@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: job-scheduler
+
+  datasource:
+    url: jdbc:mysql://localhost:3307/job_scheduler?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: job_user
+    password: job_password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 3s
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+job-queue:
+  stream-key: jobs:stream
+  consumer-group: job-workers
