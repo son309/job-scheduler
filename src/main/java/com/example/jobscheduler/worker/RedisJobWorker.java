@@ -2,14 +2,17 @@ package com.example.jobscheduler.worker;
 
 import com.example.jobscheduler.queue.QueueConstants;
 import com.example.jobscheduler.service.JobLifecycleService;
-import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.stream.*;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -45,11 +48,15 @@ public class RedisJobWorker {
     @Value("${job-queue.poll-timeout:2s}")
     private Duration pollTimeout;
 
+    @Value("${job-queue.pending-idle:15s}")
+    private Duration pendingIdle;
+
     private volatile boolean running;
+    private String recoveryConsumerName;
     private ExecutorService consumerExecutor;
     private ExecutorService handlerExecutor;
 
-    @PostConstruct
+    @EventListener(ApplicationReadyEvent.class)
     public void start() {
         running = true;
         consumerExecutor = Executors.newFixedThreadPool(
@@ -62,9 +69,53 @@ public class RedisJobWorker {
         );
 
         String instanceId = UUID.randomUUID().toString().substring(0, 8);
+        recoveryConsumerName = instanceId + "-recovery";
         for (int index = 0; index < workerCount; index++) {
             String consumerName = instanceId + "-" + index;
             consumerExecutor.submit(() -> consumeLoop(consumerName));
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${job-queue.pending-recovery-poll-ms:5000}")
+    public void reclaimPendingMessages() {
+        if (!running || recoveryConsumerName == null) {
+            return;
+        }
+
+        try {
+            PendingMessages pendingMessages =
+                    redisTemplate.opsForStream().pending(
+                            streamKey,
+                            consumerGroup,
+                            Range.unbounded(),
+                            100,
+                            pendingIdle
+                    );
+
+            if (pendingMessages.isEmpty()) {
+                return;
+            }
+
+            RecordId[] ids = pendingMessages.stream()
+                    .map(PendingMessage::getId)
+                    .toArray(RecordId[]::new);
+
+            List<MapRecord<String, Object, Object>> claimedRecords =
+                    redisTemplate.opsForStream().claim(
+                            streamKey,
+                            consumerGroup,
+                            recoveryConsumerName,
+                            pendingIdle,
+                            ids
+                    );
+
+            for (MapRecord<String, Object, Object> record : claimedRecords) {
+                if (processRecord(record, recoveryConsumerName)) {
+                    acknowledge(record.getId());
+                }
+            }
+        } catch (Exception exception) {
+            log.error("Could not reclaim pending Redis messages", exception);
         }
     }
 

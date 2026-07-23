@@ -39,6 +39,8 @@ job-queue:
   consumer-group: job-workers
   worker-count: 4
   poll-timeout: 2s
+  pending-idle: 15s
+  pending-recovery-poll-ms: 5000
   recovery-poll-ms: 1000
   schedule-poll-ms: 1000
   queue-stale-after: 10s
