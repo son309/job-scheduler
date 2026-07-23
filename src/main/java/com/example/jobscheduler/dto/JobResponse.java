@@ -19,6 +19,8 @@ public record JobResponse(
         String errorMessage,
         Instant startedAt,
         Instant finishedAt,
+        Instant nextAttemptAt,
+        String workerId,
         Instant createdAt,
         Instant updatedAt
 ) {

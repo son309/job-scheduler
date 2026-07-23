@@ -6,7 +6,7 @@ import com.example.jobscheduler.dto.SubmitJobRequest;
 import com.example.jobscheduler.entity.Job;
 import com.example.jobscheduler.entity.JobStatus;
 import com.example.jobscheduler.exception.JobNotFoundException;
-import com.example.jobscheduler.queue.JobQueueProducer;
+import com.example.jobscheduler.queue.JobQueueCoordinator;
 import com.example.jobscheduler.repository.JobRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -31,9 +31,9 @@ public class JobService {
 
     private final JobRepository jobRepository;
     private final ObjectMapper objectMapper;
-    private final JobQueueProducer jobQueueProducer;
+    private final JobLifecycleService lifecycleService;
+    private final JobQueueCoordinator queueCoordinator;
 
-    @Transactional
     public JobResponse submit(SubmitJobRequest request) {
         String idempotencyKey =
                 normalizeIdempotencyKey(request.idempotencyKey());
@@ -47,7 +47,12 @@ public class JobService {
                     jobRepository.findByIdempotencyKey(idempotencyKey);
 
             if (existingJob.isPresent()) {
-                return toResponse(existingJob.get());
+                Job job = existingJob.get();
+                if (job.getStatus() == JobStatus.PENDING) {
+                    queueCoordinator.enqueuePending(job.getId());
+                    return getById(job.getId());
+                }
+                return toResponse(job);
             }
         }
 
@@ -74,38 +79,9 @@ public class JobService {
          * saveAndFlush giúp lệnh INSERT được gửi xuống MySQL
          * trước khi đẩy jobId sang Redis.
          */
-        Job savedJob = jobRepository.saveAndFlush(job);
-
-        try {
-            /*
-             * Redis chỉ lưu jobId.
-             * Payload và trạng thái đầy đủ vẫn nằm trong MySQL.
-             */
-            jobQueueProducer.enqueue(savedJob.getId());
-
-            /*
-             * Enqueue thành công thì chuyển trạng thái
-             * từ PENDING sang QUEUED.
-             */
-            savedJob.setStatus(JobStatus.QUEUED);
-
-            Job queuedJob = jobRepository.save(savedJob);
-
-            return toResponse(queuedJob);
-        } catch (Exception exception) {
-            /*
-             * Nếu Redis lỗi, giữ job ở PENDING.
-             * Ở giai đoạn sau sẽ có scheduler quét các job PENDING
-             * để thử enqueue lại.
-             */
-            savedJob.setStatus(JobStatus.PENDING);
-            jobRepository.save(savedJob);
-
-            throw new IllegalStateException(
-                    "Job was saved but could not be added to Redis queue",
-                    exception
-            );
-        }
+        Job savedJob = lifecycleService.create(job);
+        queueCoordinator.enqueuePending(savedJob.getId());
+        return getById(savedJob.getId());
     }
 
     @Transactional(readOnly = true)
@@ -183,6 +159,8 @@ public class JobService {
                 job.getErrorMessage(),
                 job.getStartedAt(),
                 job.getFinishedAt(),
+                job.getNextAttemptAt(),
+                job.getWorkerId(),
                 job.getCreatedAt(),
                 job.getUpdatedAt()
         );

@@ -36,7 +36,7 @@ class JobSchedulerApplicationTests {
                 objectMapper.readValue(requestBody, SubmitJobRequest.class);
 
         assertThat(request.jobType()).isEqualTo("EMAIL");
-        assertThat(request.payload().get("recipient").asText())
+        assertThat(request.payload().get("recipient").asString())
                 .isEqualTo("user@example.com");
         assertThat(request.payload().get("priority").asInt())
                 .isEqualTo(1);

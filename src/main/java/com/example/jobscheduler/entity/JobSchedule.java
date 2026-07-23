@@ -9,22 +9,17 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "jobs")
+@Table(name = "job_schedules")
 @Getter
 @Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class Job {
+public class JobSchedule {
 
     @Id
     @JdbcTypeCode(SqlTypes.VARCHAR)
-    @Column(
-            name = "id",
-            nullable = false,
-            length = 36,
-            columnDefinition = "char(36)"
-    )
+    @Column(name = "id", nullable = false, length = 36, columnDefinition = "char(36)")
     private UUID id;
 
     @Column(name = "job_type", nullable = false, length = 100)
@@ -34,12 +29,11 @@ public class Job {
     @Column(name = "payload", nullable = false, columnDefinition = "json")
     private String payload;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, length = 30)
-    private JobStatus status;
+    @Column(name = "cron_expression", nullable = false, length = 100)
+    private String cronExpression;
 
-    @Column(name = "attempt_count", nullable = false)
-    private int attemptCount;
+    @Column(name = "timezone", nullable = false, length = 80)
+    private String timezone;
 
     @Column(name = "max_retries", nullable = false)
     private int maxRetries;
@@ -47,27 +41,14 @@ public class Job {
     @Column(name = "timeout_seconds", nullable = false)
     private int timeoutSeconds;
 
-    @Column(name = "idempotency_key", unique = true, length = 255)
-    private String idempotencyKey;
+    @Column(name = "enabled", nullable = false)
+    private boolean enabled;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "result", columnDefinition = "json")
-    private String result;
+    @Column(name = "next_run_at", nullable = false)
+    private Instant nextRunAt;
 
-    @Column(name = "error_message", columnDefinition = "text")
-    private String errorMessage;
-
-    @Column(name = "started_at")
-    private Instant startedAt;
-
-    @Column(name = "finished_at")
-    private Instant finishedAt;
-
-    @Column(name = "next_attempt_at")
-    private Instant nextAttemptAt;
-
-    @Column(name = "worker_id", length = 100)
-    private String workerId;
+    @Column(name = "last_run_at")
+    private Instant lastRunAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -86,15 +67,9 @@ public class Job {
         if (id == null) {
             id = UUID.randomUUID();
         }
-
-        if (status == null) {
-            status = JobStatus.PENDING;
-        }
-
         if (createdAt == null) {
             createdAt = now;
         }
-
         updatedAt = now;
     }
 
